@@ -7,9 +7,10 @@ from openpyxl import load_workbook
 
 BOT_TOKEN     = "8688745859:AAFcShsQng2sBVCruJ1c5yplyzwN9iuXn-g"
 ADMIN_IDS     = [7968570881]
-TG_CHANNEL    = "https://t.me/specialdebate"
-TG_CHANNEL_ID = "@specialdebate"
-IG_PAGE       = "https://instagram.com/avazbekov_ss"
+#ADMIN_IDS     = [7968570881]
+TG_CHANNEL    = "https://t.me/specialdebate_TIM"
+TG_CHANNEL_ID = "@specialdebate_TIM"
+IG_PAGE       = "soon"
 DATA_FILE     = "registrations.xlsx"
 EVENT_FILE    = "event_data.json"
 USERS_FILE    = "all_users.json"
