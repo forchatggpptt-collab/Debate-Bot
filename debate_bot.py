@@ -2,19 +2,90 @@ import logging, os, json, asyncio, sys
 from datetime import datetime
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, ChatMember
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
-import openpyxl
-from openpyxl import load_workbook
+import gspread
+from google.oauth2.service_account import Credentials
 
 BOT_TOKEN     = "8688745859:AAFcShsQng2sBVCruJ1c5yplyzwN9iuXn-g"
 ADMIN_IDS     = [7968570881]
-TG_CHANNEL    = "https://t.me/centraldebate_TIM"
-TG_CHANNEL_ID = "@centraldebate_TIM"
-IG_PAGE       = "soon"
-DATA_FILE     = "registrations.xlsx"
+TG_CHANNEL    = "https://t.me/specialdebate"
+TG_CHANNEL_ID = "@specialdebate"
+IG_PAGE       = "https://instagram.com/avazbekov_ss"
 EVENT_FILE    = "event_data.json"
 USERS_FILE    = "all_users.json"
+ATTEND_FILE   = "attendance.json"
+POINTS_FILE   = "points.json"
+
+SPREADSHEET_ID = "1bdX-iX3VzRJti2UstV7FjBTURd95z12r9gAjFE3Zdjs"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
+
+# ── Google Sheets setup ────────────────────────────────────────────────────────
+
+def get_sheet():
+    scopes = ["https://www.googleapis.com/auth/spreadsheets",
+              "https://www.googleapis.com/auth/drive"]
+    # Credentials from environment variable (Railway) or local file
+    creds_json = os.environ.get("GOOGLE_CREDENTIALS")
+    if creds_json:
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write(creds_json)
+            tmp_path = f.name
+        creds = Credentials.from_service_account_file(tmp_path, scopes=scopes)
+        os.unlink(tmp_path)
+    else:
+        creds = Credentials.from_service_account_file("credentials.json", scopes=scopes)
+    client = gspread.authorize(creds)
+    sheet = client.open_by_key(SPREADSHEET_ID).sheet1
+    return sheet
+
+def get_regs():
+    try:
+        sheet = get_sheet()
+        rows = sheet.get_all_records()
+        regs = {}
+        for row in rows:
+            uid = str(row.get("UserID","")).strip()
+            if uid:
+                regs[uid] = {
+                    "name":    row.get("Full Name",""),
+                    "school":  row.get("School",""),
+                    "class":   row.get("Class",""),
+                    "age":     row.get("Age",""),
+                    "english": row.get("English",""),
+                    "date":    row.get("Registered At",""),
+                }
+        return regs
+    except Exception as e:
+        logging.error(f"get_regs error: {e}")
+        return {}
+
+def save_reg(uid, d):
+    try:
+        sheet = get_sheet()
+        uid = str(uid)
+        # Find and delete existing row for this user
+        cell = None
+        try:
+            cell = sheet.find(uid, in_column=1)
+        except gspread.exceptions.CellNotFound:
+            pass
+        if cell:
+            sheet.delete_rows(cell.row)
+        # Append new row
+        sheet.append_row([
+            uid,
+            d.get("name",""),
+            d.get("school",""),
+            d.get("class",""),
+            d.get("age",""),
+            d.get("english",""),
+            datetime.now().strftime("%Y-%m-%d %H:%M")
+        ])
+    except Exception as e:
+        logging.error(f"save_reg error: {e}")
+
+# ── States ─────────────────────────────────────────────────────────────────────
 
 (LANG, MAIN_MENU, SU_NAME, SU_SCHOOL, SU_CLASS, SU_AGE, SU_ENGLISH,
  SU_FOLLOW, SU_CONFIRM, SU_EDIT_MENU, SU_EDIT_FIELD,
@@ -74,6 +145,8 @@ T = {
 
 def tr(lang, k): return T.get(lang, T["en"]).get(k, k)
 
+# ── Local JSON helpers (event, users, attendance, points) ──────────────────────
+
 def load_event():
     if os.path.exists(EVENT_FILE):
         with open(EVENT_FILE,"r",encoding="utf-8") as f: return json.load(f)
@@ -93,36 +166,41 @@ def add_user(uid):
         users.append(str(uid))
         with open(USERS_FILE,"w") as f: json.dump(users,f)
 
-def get_regs():
-    if not os.path.exists(DATA_FILE): return {}
-    wb = load_workbook(DATA_FILE); ws = wb.active; regs = {}
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if row[0]: regs[str(row[0])] = {"name":row[1],"school":row[2],"class":row[3],"age":row[4],"english":row[5],"date":row[6]}
-    return regs
+def load_attendance():
+    if os.path.exists(ATTEND_FILE):
+        with open(ATTEND_FILE,"r",encoding="utf-8") as f: return json.load(f)
+    return {}
 
-def save_reg(uid, d):
-    wb = load_workbook(DATA_FILE) if os.path.exists(DATA_FILE) else openpyxl.Workbook()
-    if not os.path.exists(DATA_FILE):
-        ws = wb.active; ws.title="Registrations"
-        ws.append(["UserID","Full Name","School","Class","Age","English","Registered At"])
-    ws = wb.active
-    todel = [r[0].row for r in ws.iter_rows(min_row=2) if str(r[0].value)==str(uid)]
-    for r in reversed(todel): ws.delete_rows(r)
-    ws.append([str(uid),d.get("name",""),d.get("school",""),d.get("class",""),d.get("age",""),d.get("english",""),datetime.now().strftime("%Y-%m-%d %H:%M")])
-    wb.save(DATA_FILE)
+def save_attendance(d):
+    with open(ATTEND_FILE,"w",encoding="utf-8") as f: json.dump(d,f,ensure_ascii=False)
+
+def load_points():
+    if os.path.exists(POINTS_FILE):
+        with open(POINTS_FILE,"r",encoding="utf-8") as f: return json.load(f)
+    return {}
+
+def save_points(d):
+    with open(POINTS_FILE,"w",encoding="utf-8") as f: json.dump(d,f,ensure_ascii=False)
 
 def is_reg(uid): return str(uid) in get_regs()
 def is_adm(uid): return uid in ADMIN_IDS
 
+# ── Keyboards ──────────────────────────────────────────────────────────────────
+
 def lang_kb(): return ReplyKeyboardMarkup([["🇺🇿 O'zbek","🇷🇺 Русский","🇬🇧 English"]],resize_keyboard=True,one_time_keyboard=True)
 def menu_kb(l): return ReplyKeyboardMarkup([[tr(l,"su")],[tr(l,"bk")]],resize_keyboard=True)
 def class_kb(): return ReplyKeyboardMarkup([[f"{g}-01",f"{g}-02",f"{g}-03"] for g in range(5,12)],resize_keyboard=True,one_time_keyboard=True)
+def admin_main_kb(): return ReplyKeyboardMarkup([["✅ Check Attendance","🏆 Announce Points"],["🔙 Back"]],resize_keyboard=True)
+
+# ── Channel membership check ───────────────────────────────────────────────────
 
 async def chk_member(bot, uid):
     try:
         m = await bot.get_chat_member(chat_id=TG_CHANNEL_ID, user_id=uid)
         return m.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER]
     except: return True
+
+# ── Conversation handlers ──────────────────────────────────────────────────────
 
 async def start(u: Update, c: ContextTypes.DEFAULT_TYPE):
     c.user_data.clear(); add_user(u.effective_user.id)
@@ -238,27 +316,7 @@ async def su_edit_field(u: Update, c: ContextTypes.DEFAULT_TYPE):
     await u.message.reply_text(tr(l,"cv").format(name=s.get("name",""),school=s.get("school",""),cls=s.get("class","-"),age=s.get("age",""),eng=s.get("english","")),
         parse_mode="HTML",reply_markup=ReplyKeyboardMarkup([[tr(l,"ok"),tr(l,"ed")]],resize_keyboard=True)); return SU_CONFIRM
 
-ATTEND_FILE = "attendance.json"
-POINTS_FILE = "points.json"
-
-def load_attendance():
-    if os.path.exists(ATTEND_FILE):
-        with open(ATTEND_FILE,"r",encoding="utf-8") as f: return json.load(f)
-    return {}
-
-def save_attendance(d):
-    with open(ATTEND_FILE,"w",encoding="utf-8") as f: json.dump(d,f,ensure_ascii=False)
-
-def load_points():
-    if os.path.exists(POINTS_FILE):
-        with open(POINTS_FILE,"r",encoding="utf-8") as f: return json.load(f)
-    return {}
-
-def save_points(d):
-    with open(POINTS_FILE,"w",encoding="utf-8") as f: json.dump(d,f,ensure_ascii=False)
-
-def admin_main_kb():
-    return ReplyKeyboardMarkup([["✅ Check Attendance","🏆 Announce Points"],["🔙 Back"]],resize_keyboard=True)
+# ── Admin panel ────────────────────────────────────────────────────────────────
 
 async def cmd_admin_panel(u: Update, c: ContextTypes.DEFAULT_TYPE):
     if not is_adm(u.effective_user.id): return ConversationHandler.END
@@ -355,6 +413,8 @@ async def attend_handler(u: Update, c: ContextTypes.DEFAULT_TYPE):
     await _send_attendance_list(u, c)
     return ATTEND_WAIT
 
+# ── Admin commands ─────────────────────────────────────────────────────────────
+
 async def cmd_getinfo(u: Update, c: ContextTypes.DEFAULT_TYPE):
     if not is_adm(u.effective_user.id): return
     regs = get_regs()
@@ -417,6 +477,8 @@ async def cmd_admin(u: Update, c: ContextTypes.DEFAULT_TYPE):
     if not is_adm(u.effective_user.id): return
     await u.message.reply_text("🛠 <b>Admin Commands</b>\n\n/panel — Open admin panel (attendance + points)\n/getinfo — All registrations\n/broadcast — Message all users\n/setdate — Change event date\n/settopic — Change topic\n/setphoto — Change poster",parse_mode="HTML")
 
+# ── Main ───────────────────────────────────────────────────────────────────────
+
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
@@ -474,4 +536,4 @@ if __name__ == "__main__":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    main()  
+    main()
