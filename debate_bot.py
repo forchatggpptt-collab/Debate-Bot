@@ -7,9 +7,9 @@ from google.oauth2.service_account import Credentials
 
 BOT_TOKEN     = "8688745859:AAFcShsQng2sBVCruJ1c5yplyzwN9iuXn-g"
 ADMIN_IDS     = [7968570881]
-TG_CHANNEL    = "https://t.me/specialdebate"
-TG_CHANNEL_ID = "@specialdebate"
-IG_PAGE       = "https://instagram.com/avazbekov_ss"
+TG_CHANNEL    = "https://t.me/CentralDebate_TIM"
+TG_CHANNEL_ID = "@CentralDebate_TIM"
+IG_PAGE       = "soon"
 EVENT_FILE    = "event_data.json"
 USERS_FILE    = "all_users.json"
 ATTEND_FILE   = "attendance.json"
